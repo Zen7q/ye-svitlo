@@ -1,6 +1,13 @@
 export async function loadStore(){const r=await fetch('/api/store');if(!r.ok)throw Error('Не вдалося завантажити дані');return r.json()}
 export async function loadAdminStore(){const r=await fetch('/api/store?admin=1');if(!r.ok)throw Error((await r.json()).error||'Не вдалося завантажити адмінку');return r.json()}
-export async function saveStore(data){const r=await fetch('/api/store',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw Error((await r.json()).error||'Не вдалося зберегти');return r.json();}
+export async function saveStore(data){
+ if(data.cloudPhotos){const uploaded=new Map();const products=[];
+  for(const product of data.products){const photos=[];for(const photo of product.photos||[]){if(!photo.startsWith('data:')){photos.push(photo);continue;}
+   if(!uploaded.has(photo)){const response=await fetch('/api/photos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo})});const result=await response.json();if(!response.ok)throw Error(result.error||'Не вдалося зберегти фото.');uploaded.set(photo,result.url);}photos.push(uploaded.get(photo));}
+   products.push({...product,photos});
+  }data={...data,products};
+ }
+ const r=await fetch('/api/store',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw Error((await r.json()).error||'Не вдалося зберегти');return r.json();}
 export function applyTexts(texts,editing=false){const nodes=[...document.body.querySelectorAll('*')].flatMap(el=>[...el.childNodes].filter(n=>n.nodeType===3));for(const node of nodes){if(!node.textContent.trim()||node.parentElement.closest('script,style,svg,select,textarea,#editor-bar,[data-text-key]'))continue;const key=node.textContent;if(editing){const span=document.createElement('span');span.dataset.textKey=key;span.textContent=texts[key]??key;span.className='editable-text';node.replaceWith(span)}else if(Object.hasOwn(texts,key))node.textContent=texts[key];}}
 
 export async function storeAction(store,type,payload){const r=await fetch('/api/store/actions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:store.revision,type,payload})});const data=await r.json();if(!r.ok)throw Error(data.error||'Не вдалося виконати дію');return data}
