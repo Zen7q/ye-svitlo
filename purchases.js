@@ -1,0 +1,2 @@
+export const purchaseStatuses={ordered:'Очікується',received:'Прийнято на склад',cancelled:'Скасовано'};
+export function purchaseTotals(purchase){const goodsCents=purchase.items.reduce((sum,i)=>sum+i.unitCostCents*i.quantity,0),totalCents=goodsCents+purchase.deliveryCents;return {goodsCents,totalCents,total:totalCents/100,balance:purchase.status==='cancelled'?0:(totalCents-purchase.paidCents)/100,refundDue:purchase.status==='cancelled'?purchase.paidCents/100:0};}

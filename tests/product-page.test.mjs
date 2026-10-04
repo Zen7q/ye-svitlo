@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {productPage,productSpecs} from '../product-page.js';
+const context={categories:[{id:'inverters',name:'Інвертори'}],products:[],art:()=>'<svg></svg>',back:'#/catalog?category=inverters&phases=3'};
+test('product page keeps catalog return filters and escapes text',()=>{const html=productPage({id:1,name:'<script>x</script>',category:'inverters',price:123,description:'<img onerror=x>'},context);assert.ok(html.includes('href="#/catalog?category=inverters&amp;phases=3"'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('&lt;img onerror=x&gt;'));assert.equal(html.includes('role="dialog"'),false)});
+test('gallery renders all photos and selects the saved main photo',()=>{const html=productPage({id:1,name:'Тест',category:'inverters',price:123,photos:['/one.png','/two.png','/three.png'],mainPhoto:1},context);assert.match(html,/id="product-main-photo" src="\/two.png"/);assert.equal((html.match(/data-gallery-photo=/g)||[]).length,3);assert.match(html,/data-gallery-photo="1"[^>]*aria-pressed="true"/)});
+test('specifications translate multiple functions and legacy inverter data',()=>{const specs=productSpecs({category:'inverters',extraFunctions:['wifi','can'],powerKw:15,batteryVoltage:48});assert.equal(specs.find(s=>s.label==='Додаткові функції').value,'Wi-Fi, CAN');assert.equal(specs.find(s=>s.label==='Потужність').value,'15000 Вт');assert.equal(specs.find(s=>s.label==='Тип акумулятора').value,'Низьковольтний (LV)')});
+test('unavailable products cannot be added and missing products have a recovery link',()=>{const html=productPage({id:1,name:'Тест',category:'inverters',price:123,stockStatus:'out-of-stock'},context);assert.match(html,/class="primary product-add" type="submit" disabled/);assert.ok(productPage(null,context).includes('Товар не знайдено'))});
+test('primary specs contain only category essentials while full specs include missing filter values',()=>{
+ const p={id:1,name:'Тест',category:'inverters',brand:'Deye',price:123,powerKw:15,phases:3};
+ const specs=productSpecs(p,[p]);
+ assert.ok(specs.some(s=>s.key==='extraFunctions'&&s.missing&&s.value==='Не вказано'));
+ assert.ok(specs.some(s=>s.key==='apparentPowerVa'&&s.missing));
+ const html=productPage(p,{...context,products:[p]});
+ const primary=html.split('<div class="product-key-specs">')[1].split('</section>')[0];
+ assert.ok(primary.includes('<dt>Виробник</dt>'));
+ assert.ok(primary.includes('<dt>Потужність</dt>'));
+ assert.ok(primary.includes('<dt>Кількість фаз</dt>'));
+ assert.equal(primary.includes('Не вказано'),false);
+ assert.equal(primary.includes('Додаткові функції'),false);
+ assert.equal((html.match(/<dt>Кількість MPPT<\/dt>/g)||[]).length,1);
+ assert.equal((html.match(/<dt>Додаткові функції<\/dt>/g)||[]).length,1);
+ assert.equal(p.powerW,undefined);
+});
