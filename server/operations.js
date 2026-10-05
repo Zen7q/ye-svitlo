@@ -14,8 +14,8 @@ function optional(value,max){if(value===undefined)return '';if(typeof value!=='s
 function orderFor(store,id){const order=store.orders.find(o=>o.id===id);if(!order)throw Error('Замовлення не знайдено.');return order;}
 export function applyOperation(store,type,payload){
  if(type==='archive-record'){
-  if(!['orders','purchases'].includes(payload.kind)||typeof payload.archived!=='boolean')throw Error('Перевірте тип запису та дію архіву.');
-  const record=store[payload.kind].find(r=>r.id===payload.id);if(!record)throw Error('Запис не знайдено.');
+  if(!['orders','purchases','consultations'].includes(payload.kind)||typeof payload.archived!=='boolean')throw Error('Перевірте тип запису та дію архіву.');
+  const record=(store[payload.kind]||[]).find(r=>r.id===payload.id);if(!record)throw Error('Запис не знайдено.');
   if(payload.archived&&!canArchiveRecord(payload.kind,record))throw Error('Спочатку завершіть або скасуйте запис. Відкриті записи залишаються в роботі.');
   record.archived=payload.archived;return store;
  }

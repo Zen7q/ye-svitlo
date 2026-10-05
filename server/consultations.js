@@ -26,5 +26,6 @@ export function createConsultation(current,payload){
 export function updateConsultation(current,payload){
  const item=(current.consultations||[]).find(r=>r.id===payload.id);
  if(!item||!Object.hasOwn(consultationStatuses,payload.status))throw Error('Заявку або статус не знайдено.');
+ if(item.archived)throw Error('Спочатку поверніть заявку з архіву.');
  item.status=payload.status;item.updatedAt=new Date().toISOString();return current;
 }

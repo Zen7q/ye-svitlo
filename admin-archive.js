@@ -1,5 +1,6 @@
 import {mountRecordSearch} from './admin-record-search.js';
 import {archiveSections,archivedRecords} from './archive.js';
+import {startConsultations} from './admin-consultations.js';
 import {startOrders} from './admin-orders.js';
 import {startPurchases} from './admin-purchases.js';
 import {esc,money} from './admin-utils.js';
@@ -11,6 +12,7 @@ export function startArchive(work,store,categories,options){
   options.setDirty(false);
   work.innerHTML=`<h2>Архів</h2><p class="accounting-note">Архівовані записи приховані у робочих списках. Тут їх можна переглянути й повернути. Суми, оплати та історія руху товарів зберігаються.</p><div class="admin-tabs">${Object.entries(archiveSections).map(([key,label])=>`<button data-archive-section="${key}" aria-pressed="${kind===key}">${label} · ${archivedRecords(store,key).length}</button>`).join('')}</div><div id="archive-work"></div>`;
   const content=work.querySelector('#archive-work');
+  if(kind==='consultations')return startConsultations(content,store,childOptions);
   if(kind==='orders')return startOrders(content,store,childOptions);
   if(kind==='purchases')return startPurchases(content,store,childOptions);
   if(kind==='suppliers')return startPurchases(content,store,{...childOptions,initialSection:'suppliers'});

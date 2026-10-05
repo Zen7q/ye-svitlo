@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
 import {calculateSolar,estimateSystemPrice} from '../power-calculator.js';
+import {archivedRecords} from '../archive.js';
 import {consultationInput} from '../server/consultations.js';
 import {createStoreService,createStoreMiddleware,publicStore} from '../server/store-service.js';
 const payload=()=>({requestId:randomUUID(),phone:'(067) 123-45-67',name:'Тестовий клієнт',comment:'Тестова консультація',consent:true,calculation:{monthlyKwh:500}});
@@ -61,4 +62,33 @@ test('callback HTTP accepts only bounded same-origin JSON, returns no contacts a
  assert.equal((await send({...payload(),comment:'x'.repeat(9000)})).status,413);
  for(let i=0;i<3;i++)await send(payload());assert.equal((await send(payload())).status,429);
  }finally{await new Promise(r=>server.close(r));await rm(folder,{recursive:true,force:true});}
+});
+
+
+test('consultation archive survives restart, preserves snapshots and retries, and restores without changing accounting',async()=>{
+ const folder=await mkdtemp(join(tmpdir(),'ye-consultation-archive-'));
+ try{
+  const service=createStoreService(folder),request={...payload(),calculation:{monthlyKwh:750,hasElectricCar:true,includeBattery:true}};
+  await service.consultation(request);
+  const before=await service.read(),record=structuredClone(before.consultations[0]);
+  const archived=await service.action({revision:before.revision,type:'archive-record',payload:{kind:'consultations',id:record.id,archived:true}});
+  assert.equal(archivedRecords(archived,'consultations',false).length,0);
+  assert.equal(archivedRecords(archived,'consultations').length,1);
+  assert.deepEqual(archived.consultations[0],{...record,archived:true});
+  for(const key of ['orders','purchases','inventory','movements','costs'])assert.deepEqual(archived[key],before[key]);
+  const restarted=createStoreService(folder),saved=await restarted.read();
+  assert.deepEqual(saved.consultations[0],{...record,archived:true});
+  assert.equal(publicStore(saved).consultations,undefined);
+  assert.deepEqual(await restarted.consultation(request),{number:record.number});
+  let current=await restarted.read();
+  assert.equal(current.consultations.length,1);assert.equal(current.consultations[0].archived,true);
+  await assert.rejects(restarted.action({revision:current.revision,type:'update-consultation',payload:{id:record.id,status:'completed'}}),/поверніть/);
+  for(const change of [{id:'missing',archived:false},{id:record.id,archived:'yes'}])await assert.rejects(restarted.action({revision:current.revision,type:'archive-record',payload:{kind:'consultations',...change}}));
+  await assert.rejects(restarted.action({revision:before.revision,type:'archive-record',payload:{kind:'consultations',id:record.id,archived:false}}),e=>e.status===409);
+  current=await restarted.action({revision:current.revision,type:'archive-record',payload:{kind:'consultations',id:record.id,archived:false}});
+  assert.deepEqual(current.consultations[0],{...record,archived:false});
+  assert.equal(archivedRecords(current,'consultations').length,0);assert.equal(archivedRecords(current,'consultations',false).length,1);
+  current=await restarted.action({revision:current.revision,type:'update-consultation',payload:{id:record.id,status:'completed'}});
+  assert.equal(current.consultations[0].status,'completed');
+ }finally{await rm(folder,{recursive:true,force:true});}
 });
