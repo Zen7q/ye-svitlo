@@ -1,3 +1,4 @@
+import {createConsultation,updateConsultation} from './consultations.js';
 import {readJson} from './http-json.js';
 import {readFile,readdir,mkdir,writeFile,rename} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -14,7 +15,7 @@ const publicFields=new Set(['id','name','category','price','brand','description'
 export function publicStore(data){const productData=p=>{const result=Object.fromEntries(Object.entries(p).filter(([key])=>publicFields.has(key)));const stock=stockInfo(data,p.id);if(stock.tracked&&p.stockStatus!=='preorder')result.stockStatus=stock.available>0?'in-stock':'out-of-stock';return result;};return {...(data.demo?{demo:true}:{}),products:data.products.filter(p=>!p.archived).map(productData),texts:data.texts,promotions:(data.promotions||[]).map(p=>Object.fromEntries(['id','name','targetType','targetId','discountType','value','enabled'].map(key=>[key,p[key]])))};}
 export function createStoreService(folder,{repository}={}){
  const file=join(folder,'store.json'),historyFolder=join(folder,'history'),latestRevision=Symbol('checkout');let queue=Promise.resolve();
- async function read(){let data;if(repository)data=await repository.read();else try{data=JSON.parse(await readFile(file,'utf8'))}catch(e){if(e.code!=='ENOENT')throw e;data={products:[],texts:{}}}return {revision:0,promoCodes:[],costs:{},inventory:{},orders:[],suppliers:[],purchases:[],movements:[],...data};}
+ async function read(){let data;if(repository)data=await repository.read();else try{data=JSON.parse(await readFile(file,'utf8'))}catch(e){if(e.code!=='ENOENT')throw e;data={products:[],texts:{}}}return {revision:0,consultations:[],promoCodes:[],costs:{},inventory:{},orders:[],suppliers:[],purchases:[],movements:[],...data};}
  async function history(){if(repository)return repository.history();let names;try{names=await readdir(historyFolder)}catch(e){if(e.code==='ENOENT')return [];throw e}const records=await Promise.all(names.filter(n=>n.endsWith('.json')).map(async n=>{const item=JSON.parse(await readFile(join(historyFolder,n),'utf8'));return {id:n.slice(0,-5),createdAt:item.createdAt,label:item.label}}));return records.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
  async function update(revision,change,label){
   const commit=async current=>{
@@ -33,15 +34,24 @@ export function createStoreService(folder,{repository}={}){
 
  function save(data){return update(data.revision,current=>{if(!Array.isArray(data.products)||!data.texts||typeof data.texts!=='object'||Array.isArray(data.texts))throw Error('Неправильні дані.');for(const p of data.products)if(!p.id||typeof p.name!=='string'||!p.name.trim()||!Number.isFinite(p.price)||p.price<=0)throw Error('Вкажіть назву та коректну ціну товару.');if(new Set(data.products.map(p=>String(p.id))).size!==data.products.length)throw Error('Повторюються ідентифікатори товарів.');validatePromotions(data.promotions||[],data.products);validateCosts(data.costs||{},data.products);const promoCodes=validatePromoCodes(data.promoCodes??current.promoCodes);checkReferences(current,data.products);return {...current,promoCodes,products:data.products,texts:data.texts,promotions:data.promotions||[],costs:data.costs||{}};},'Редагування каталогу, собівартості або акцій');}
  function checkReferences(current,products){const ids=new Set(products.map(p=>String(p.id)));const referenced=[...Object.keys(current.inventory),...current.orders.flatMap(o=>o.items.map(i=>i.productId)),...current.purchases.flatMap(p=>p.items.map(i=>i.productId))];if(referenced.some(id=>!ids.has(String(id))))throw Error('Не можна прибрати товар, пов’язаний зі складом, замовленнями чи закупівлями. Використайте архівування.');}
- const action=(data)=>update(data.revision,async current=>{if(data.type==='restore-catalog'){const id=data.payload.id;if(typeof id!=='string'||! /^[a-f0-9-]{36}$/.test(id))throw Error('Неправильний знімок.');const old=repository?await repository.snapshot(id):JSON.parse(await readFile(join(historyFolder,id+'.json'),'utf8'));if(!old)throw Error('Знімок не знайдено.');checkReferences(current,old.products);validateCosts(old.costs,old.products);validatePromotions(old.promotions,old.products);return {...current,products:old.products,costs:old.costs,promotions:old.promotions};}return applyOperation(current,data.type,data.payload);},['bulk-products','restore-catalog','receive-purchase'].includes(data.type)?'Масова зміна або відновлення каталогу':null);
+ const action=(data)=>update(data.revision,async current=>{if(data.type==='update-consultation')return updateConsultation(current,data.payload);if(data.type==='restore-catalog'){const id=data.payload.id;if(typeof id!=='string'||! /^[a-f0-9-]{36}$/.test(id))throw Error('Неправильний знімок.');const old=repository?await repository.snapshot(id):JSON.parse(await readFile(join(historyFolder,id+'.json'),'utf8'));if(!old)throw Error('Знімок не знайдено.');checkReferences(current,old.products);validateCosts(old.costs,old.products);validatePromotions(old.promotions,old.products);return {...current,products:old.products,costs:old.costs,promotions:old.promotions};}return applyOperation(current,data.type,data.payload);},['bulk-products','restore-catalog','receive-purchase'].includes(data.type)?'Масова зміна або відновлення каталогу':null);
  async function checkout(payload){let receipt;await update(latestRevision,current=>{receipt={...checkoutReceipt(checkoutOrder(current,payload)),...(current.demo?{demo:true}:{})};return current;});return receipt;}
- return {read,update,save,action,history,checkout};
+ async function consultation(payload){let item;await update(latestRevision,current=>{item=createConsultation(current,payload);return current;});return {number:item.number,...(item.demo?{demo:true}:{})};}
+ return {read,update,save,action,history,checkout,consultation};
 }
 export function createStoreMiddleware(folder,auth,directory,{repository,rateLimit,demo=false}={}){
- const service=createStoreService(folder,{repository}),checkoutAttempts=new Map(),quoteAttempts=new Map();
+ const service=createStoreService(folder,{repository}),checkoutAttempts=new Map(),quoteAttempts=new Map(),consultationAttempts=new Map();
  return async(req,res)=>{res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');const reply=(status,data)=>{res.statusCode=status;res.end(JSON.stringify(data))};try{
   const url=new URL(req.url,'http://local');
   if(req.method==='GET'){if(url.pathname==='/history'){if(!await auth.authorized(req)){reply(401,{error:'Увійдіть в адмінку.'});return}reply(200,await service.history());return}if(url.pathname!=='/'){reply(404,{error:'Не знайдено'});return}if(url.searchParams.has('admin')){if(!await auth.authorized(req)){reply(401,{error:'Увійдіть в адмінку.'});return}reply(200,{...await service.read(),...(repository?{cloudPhotos:true}:{}),...(demo?{demo:true}:{})});return}reply(200,{...publicStore(await service.read()),...(demo?{demo:true}:{})});return}
+  if(req.method==='POST'&&url.pathname==='/consultations'){
+   if(!auth.sameOrigin(req)){reply(403,{error:'Запит з іншого сайту відхилено'});return;}
+   if(!req.headers['content-type']?.startsWith('application/json')){reply(400,{error:'Неправильний формат запиту.'});return;}
+   const now=Date.now(),address=req.socket.remoteAddress||'local';
+   if(rateLimit){if(!await rateLimit(req,'consultations',5)){reply(429,{error:'Забагато заявок. Спробуйте через 10 хвилин.'});return;}}
+   else{for(const [key,times] of consultationAttempts)if(times.every(t=>now-t>=600000))consultationAttempts.delete(key);const recent=(consultationAttempts.get(address)||[]).filter(t=>now-t<600000);if(recent.length>=5){reply(429,{error:'Забагато заявок. Спробуйте через 10 хвилин.'});return;}recent.push(now);consultationAttempts.set(address,recent);}
+   reply(200,{...await service.consultation(await readJson(req,8000)),...(demo?{demo:true}:{})});return;
+  }
   if(req.method==='POST'&&['/checkout','/quote'].includes(url.pathname)){
    if(!auth.sameOrigin(req)){reply(403,{error:'Запит з іншого сайту відхилено'});return}
    if(!req.headers['content-type']?.startsWith('application/json')){reply(400,{error:'Неправильний формат запиту.'});return}

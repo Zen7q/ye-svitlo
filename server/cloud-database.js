@@ -1,7 +1,7 @@
 import {Pool} from 'pg';
 import {createHash} from 'node:crypto';
 
-export const emptyStore=()=>({revision:0,products:[],texts:{},promotions:[],promoCodes:[],costs:{},inventory:{},orders:[],suppliers:[],purchases:[],movements:[]});
+export const emptyStore=()=>({revision:0,consultations:[],products:[],texts:{},promotions:[],promoCodes:[],costs:{},inventory:{},orders:[],suppliers:[],purchases:[],movements:[]});
 export function createCloudDatabase({pool,connectionString=process.env.DATABASE_URL||process.env.POSTGRES_URL,namespace=process.env.YE_STORE_NAMESPACE||'demo',initialData=emptyStore()}={}){
  if(!pool){if(!connectionString)throw Error('Не налаштовано хмарну базу.');pool=new Pool({connectionString,max:3,connectionTimeoutMillis:12000,idleTimeoutMillis:10000,allowExitOnIdle:true});}
  if(!/^[a-z0-9_-]{1,40}$/.test(namespace))throw Error('Неправильний простір даних.');
